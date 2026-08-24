@@ -78,3 +78,4 @@ doubling **M** (twice as large), leaving the result unchanged.
 - All calculation is client-side (the [SheetJS](https://sheetjs.com) parser is
   inlined), so no data ever leaves your machine.
 - Any bundled sample data is fictitious (EXAMPLE CORP, etc.).
+
