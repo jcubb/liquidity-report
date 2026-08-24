@@ -1,4 +1,4 @@
-# TruView Liquidity Report
+# Liquidity Report
 
 A single, self-contained HTML report for estimating how much of a fund's
 portfolio can be liquidated over a range of day-horizons. Everything runs
@@ -7,7 +7,7 @@ HTML file and drag in a holdings export.
 
 ## Usage
 
-1. Open **`TruView_Liquidity_Report.html`** in any modern browser.
+1. Open **`Liquidity_Report.html`** in any modern browser.
 2. Drag an OversightSummary `.xlsx` onto the page (or click to browse).
 3. Pick a fund (by description or fund ticker), then adjust parameters — the report
    recalculates live.
