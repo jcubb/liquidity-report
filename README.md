@@ -34,7 +34,7 @@ The report reads the OversightSummary worksheet and expects these columns:
 | `significant_market_impact` | The ADV assumption used per security when the file was produced (standard = 20, i.e. 20% of ADV/day; may differ per security) |
 
 The report date is parsed from the filename pattern `_MMDDYYYY_`
-(e.g. `OversightSummary_DFA_06302026_pivot.xlsx` → June 30, 2026).
+(e.g. `Summary_06302026_pivot.xlsx` → June 30, 2026).
 
 ## Parameters
 
