@@ -185,6 +185,14 @@
       </table>
     </div>
 
+    <div class="card">
+      <h3 style="margin:0 0 2px;font-size:15px">Liquidity Distribution &mdash; Cumulative Portfolio Weight by Days to Liquidate</h3>
+      <div class="foot" style="margin:0 0 10px">Share of the portfolio held in securities that liquidate within a given number of
+        days, using the file&rsquo;s original days-to-liquidate (independent of the overrides above).</div>
+      <div id="cdfWrap"></div>
+      <div class="foot" id="cdfNote"></div>
+    </div>
+
     </div><!-- /panel-report -->
 
     <div id="panel-scenarios" class="panel hidden">
@@ -200,8 +208,12 @@
         </table>
         <div class="foot">ADV assumption %: 100 = the file&rsquo;s original assumptions; 25 = each
           security&rsquo;s assumption cut to 25% of original (&asymp;4&times; slower). Fund size &times;:
-          multiplies the fund&rsquo;s actual market value. Scenarios always start from the file&rsquo;s
-          original values for the selected fund &mdash; the Report tab&rsquo;s overrides do not apply here.</div>
+          multiplies the fund&rsquo;s actual market value. <b>Pro-rata percentile %</b>: a &ldquo;near
+          pro-rata&rdquo; floor &mdash; the days-to-liquidate of the security at that cumulative-weight
+          percentile is applied as a minimum to every holding (faster names are paced up to it).
+          0 = off (no floor); 100 = pure pro-rata, where the whole book is paced by its slowest
+          position. Scenarios always start from the file&rsquo;s original values for the selected
+          fund &mdash; the Report tab&rsquo;s overrides do not apply here.</div>
       </div>
     </div><!-- /panel-scenarios -->
 
@@ -251,12 +263,21 @@
            of its weight counts. Summing across all securities gives the percent of the portfolio that is
            liquid by that horizon.</p>
         <p><b>Scenarios tab</b> &mdash; runs the same calculation for four side-by-side scenarios,
-           each defined by two numbers: an <b>ADV assumption %</b> that scales every security&rsquo;s
+           each defined by three numbers: an <b>ADV assumption %</b> that scales every security&rsquo;s
            own market-impact assumption (100 = the file&rsquo;s original values; 25 = each cut to a
-           quarter, so liquidation takes &asymp;4&times; as long) and a <b>fund size multiplier</b>
-           applied to the fund&rsquo;s actual market value. Scenario rows always start from the
-           file&rsquo;s original values for the selected fund; the Report tab&rsquo;s overrides do
-           not carry over.</p>
+           quarter, so liquidation takes &asymp;4&times; as long), a <b>fund size multiplier</b>
+           applied to the fund&rsquo;s actual market value, and a <b>pro-rata percentile %</b>
+           (described next). Scenario rows always start from the file&rsquo;s original values for the
+           selected fund; the Report tab&rsquo;s overrides do not carry over.</p>
+        <p><b>Pro-rata percentile %</b> &mdash; a way to approximate selling the book
+           <i>pro-rata</i> (every position sold at the same fractional pace). Under strict pro-rata the
+           whole portfolio is paced by its single slowest position. This input softens that: order the
+           holdings by days-to-liquidate and accumulate their weight; the security sitting at the chosen
+           cumulative-weight percentile sets a <b>minimum</b> days-to-liquidate that is applied to every
+           holding, so any faster position is slowed to that floor. The value is taken exactly (no
+           interpolation) from the security at or just above the percentile. <b>0</b> turns the floor
+           off (results match the plain calculation); values approaching <b>100</b> approach pure
+           pro-rata, where the slowest position governs the entire book.</p>
         <p class="foot">Because these figures come directly from the file&rsquo;s security weights, if
            those weights do not sum to exactly 100% the portfolio total can land slightly above or below
            100%. The <b>Data</b> tab shows the weight total and flags this.</p>
@@ -297,7 +318,7 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   var COLS={fund:"fund",desc:"fund_description",mv:"market_value",
             pct:"market_value__pct",dtl:"days_to_liquidate",smi:"significant_market_impact"};
   var DEFAULT_DAYS=[1,2,3,4,5,10,20];
-  var SCEN_DEFAULTS=[[100,1],[25,1],[100,1.5],[25,1.5]];   /* [ADV assumption %, fund size ×] */
+  var SCEN_DEFAULTS=[[100,1,0],[100,1,95],[25,1,0],[25,1,95]];   /* [ADV assumption %, fund size ×, pro-rata percentile %] */
 
   var state={rows:[],funds:[],byFund:{},codeToDesc:{},descToCode:{},
              fundTotals:{},current:null,dataSort:{col:null,dir:1}};
@@ -432,14 +453,16 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
       wrap.appendChild(lab); wrap.appendChild(inp); sdr.appendChild(wrap);
     });
 
-    /* Scenarios tab: 4 editable rows of [ADV assumption %, fund size ×] + result cells */
+    /* Scenarios tab: 4 editable rows of [ADV assumption %, fund size ×, pro-rata percentile %] + result cells */
     var sb=$("scenBody"); sb.innerHTML="";
-    SCEN_DEFAULTS.forEach(function(pair){
+    SCEN_DEFAULTS.forEach(function(trip){
       var tr=document.createElement("tr");
-      pair.forEach(function(v,j){
+      trip.forEach(function(v,j){
         var td=document.createElement("td");
         var inp=document.createElement("input");
-        inp.type="number"; inp.min="0.0001"; inp.step=(j===0?"5":"0.1"); inp.value=v;
+        inp.type="number"; inp.value=v;
+        if(j===2){ inp.min="0"; inp.max="100"; inp.step="5"; }   /* pro-rata percentile: 0 allowed, 0 = no floor */
+        else     { inp.min="0.0001"; inp.step=(j===0?"5":"0.1"); }
         inp.addEventListener("input",recalcScenarios);
         td.appendChild(inp); tr.appendChild(td);
       });
@@ -668,15 +691,36 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
 
   /* ---------- calculation ---------- */
   /* % of the portfolio liquid at horizon X; factorOf(row) returns the impact factor per security */
-  function pctLiquid(rows,X,factorOf,mScale){
-    var frac=0;
+  /* floorDtl (optional): a "near pro-rata" minimum days-to-liquidate applied to EVERY security
+     before scaling — any position faster than the floor is paced up to it. Default 0 = no floor,
+     so the Report tab (which omits the argument) is unchanged. Flooring the raw DTL then scaling
+     is identical to flooring the scaled DTL because the scaling is uniform across securities. */
+  function pctLiquid(rows,X,factorOf,mScale,floorDtl){
+    var frac=0, fl=floorDtl||0;
     rows.forEach(function(r){
-      var dtl=num(r[COLS.dtl]) * factorOf(r) * mScale;   /* effective days to liquidate */
+      var base=num(r[COLS.dtl]); if(fl>base) base=fl;    /* raise fast names to the floor */
+      var dtl=base * factorOf(r) * mScale;               /* effective days to liquidate */
       var w=num(r[COLS.pct])/100;
       if(dtl<=0){ frac+=w; return; }                     /* fully liquid */
       frac += (dtl>X) ? w*(X/dtl) : w;
     });
     return frac*100;
+  }
+
+  /* "Near pro-rata" floor: the raw days-to-liquidate of the security sitting at the given
+     cumulative-weight percentile. Sort by DTL ascending, accumulate market_value__pct, and
+     return the DTL of the first security whose cumulative weight reaches pct% of the total
+     (no interpolation — the exact value at or just above the percentile). pct<=0 → 0 (no floor);
+     pct>=100 → the slowest security's DTL (pure pro-rata). */
+  function floorDtlAtPct(rows,pct){
+    if(!(pct>0)) return 0;
+    var secs=rows.map(function(r){return {dtl:Math.max(0,num(r[COLS.dtl])), w:num(r[COLS.pct])};})
+                 .sort(function(a,b){return a.dtl-b.dtl;});
+    var total=0; secs.forEach(function(s){total+=s.w;});
+    if(!(total>0)) return 0;
+    var target=Math.min(pct,100)/100*total, cum=0;
+    for(var i=0;i<secs.length;i++){ cum+=secs[i].w; if(cum>=target) return secs[i].dtl; }
+    return secs.length?secs[secs.length-1].dtl:0;
   }
 
   function recalc(){
@@ -719,17 +763,19 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
                : scaleOK ? ("impact: each ×"+trim(pval/100)+" of original")
                : "impact: file originals";
     $("scalePill").textContent=impTxt+"  ·  fund size ×"+mScale.toFixed(2);
+    drawCdf();
   }
 
-  /* Scenarios tab: each row scales the file's original assumptions — ADV % (scale-each semantics)
-     and a fund-size multiplier on the actual market value. Report-tab overrides do not apply. */
+  /* Scenarios tab: each row scales the file's original assumptions — ADV % (scale-each semantics),
+     a fund-size multiplier on the actual market value, and an optional pro-rata percentile floor.
+     Report-tab overrides do not apply. */
   function recalcScenarios(){
     if(!state.current) return;
     var rows=state.byFund[state.current];
     var days=[].slice.call(document.querySelectorAll('#scDayRow input')).map(function(i){return num(i.value);});
 
     var thd=$("scThDays");
-    thd.innerHTML="<th>ADV assumption %</th><th>Fund size &times;</th>";
+    thd.innerHTML="<th>ADV assumption %</th><th>Fund size &times;</th><th>Pro-rata percentile %</th>";
     days.forEach(function(X){
       var th=document.createElement("th"); th.className="days"; th.textContent=X+(X==1?" day":" days");
       thd.appendChild(th);
@@ -739,13 +785,97 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
       var ins=tr.querySelectorAll("input");
       var p=parseFloat(String(ins[0].value).replace(/[,\s%]/g,""));
       var mult=parseFloat(String(ins[1].value).replace(/[,\s]/g,""));
+      var pr=parseFloat(String(ins[2].value).replace(/[,\s%]/g,""));
+      if(!isFinite(pr)||pr<0) pr=0;                     /* blank / invalid → no floor */
       var ok=isFinite(p)&&p>0&&isFinite(mult)&&mult>0;
       var factorOf=function(){return 100/p;};
+      var floorDtl=floorDtlAtPct(rows,pr);             /* raw-DTL floor at the weight percentile */
       var cells=tr.querySelectorAll("td.res");
       days.forEach(function(X,i){
-        cells[i].textContent = ok ? pctLiquid(rows,X,factorOf,mult).toFixed(1)+"%" : "—";
+        cells[i].textContent = ok ? pctLiquid(rows,X,factorOf,mult,floorDtl).toFixed(1)+"%" : "—";
       });
     });
+  }
+
+  /* Report tab: cumulative distribution of portfolio weight vs. days-to-liquidate (DTL).
+     y = cumulative % of the portfolio in securities with DTL <= x, using the file's ORIGINAL
+     days_to_liquidate (not the Report-tab overrides). x is capped at the largest "Days to
+     liquidate" box; weight beyond the cap is reported in a note. Pure inline SVG so it survives
+     offline viewing and emailing (no chart library / CDN). */
+  function drawCdf(){
+    var wrap=$("cdfWrap"), note=$("cdfNote");
+    if(!wrap) return;
+    if(!state.current){ wrap.innerHTML=""; note.textContent=""; return; }
+    var rows=state.byFund[state.current]||[];
+    var secs=rows.map(function(r){return {dtl:Math.max(0,num(r[COLS.dtl])), pct:num(r[COLS.pct])};})
+                 .sort(function(a,b){return a.dtl-b.dtl;});
+    if(!secs.length){ wrap.innerHTML="<div class='foot'>No securities to plot.</div>"; note.textContent=""; return; }
+
+    /* x-axis cap follows the largest "Days to liquidate" box on the Report tab (fallback 20) */
+    var boxes=[].slice.call(document.querySelectorAll('#dayRow input')).map(function(i){return num(i.value);});
+    var cap=Math.max.apply(null, boxes.filter(function(v){return v>0;}).concat([0]));
+    if(!(cap>0)) cap=20;
+
+    /* cumulative step points (DTL, cumulative pct) */
+    var cum=0, pts=[], withinCap=0;
+    secs.forEach(function(s){ cum+=s.pct; pts.push({x:s.dtl, y:cum}); if(s.dtl<=cap) withinCap+=s.pct; });
+    var totalPct=cum;
+
+    /* ----- SVG geometry ----- */
+    var W=720,H=360, mL=52,mR=18,mT=14,mB=42, pw=W-mL-mR, ph=H-mT-mB;
+    var x=function(d){return mL + Math.min(d,cap)/cap*pw;};
+    var y=function(v){return mT + (1 - v/100)*ph;};
+    var s=[];
+
+    for(var gy=0; gy<=100; gy+=20){
+      var yy=y(gy);
+      s.push("<line x1='"+mL+"' y1='"+yy+"' x2='"+(W-mR)+"' y2='"+yy+"' stroke='#e2e8f0'/>");
+      s.push("<text x='"+(mL-8)+"' y='"+(yy+4)+"' text-anchor='end' font-size='11' fill='#64748b'>"+gy+"</text>");
+    }
+    var step=niceStep(cap/6);
+    for(var gx=0; gx<=cap+1e-9; gx+=step){
+      var xx=x(gx);
+      s.push("<line x1='"+xx+"' y1='"+mT+"' x2='"+xx+"' y2='"+(mT+ph)+"' stroke='#f1f5f9'/>");
+      s.push("<text x='"+xx+"' y='"+(mT+ph+16)+"' text-anchor='middle' font-size='11' fill='#64748b'>"+trim(gx)+"</text>");
+    }
+    s.push("<line x1='"+mL+"' y1='"+(mT+ph)+"' x2='"+(W-mR)+"' y2='"+(mT+ph)+"' stroke='#94a3b8'/>");
+    s.push("<line x1='"+mL+"' y1='"+mT+"' x2='"+mL+"' y2='"+(mT+ph)+"' stroke='#94a3b8'/>");
+
+    /* empirical-CDF step path: horizontal at the current level to each DTL, then a vertical jump */
+    var d="M "+x(0)+" "+y(0), prevY=0, capped=false;
+    for(var i=0;i<pts.length;i++){
+      var px=pts[i].x;
+      if(px>cap){ d+=" L "+x(cap)+" "+y(prevY); capped=true; break; }
+      d+=" L "+x(px)+" "+y(prevY)+" L "+x(px)+" "+y(pts[i].y);
+      prevY=pts[i].y;
+    }
+    if(!capped) d+=" L "+x(cap)+" "+y(prevY);
+
+    s.push("<path d='"+d+" L "+x(cap)+" "+y(0)+" Z' fill='#eff6ff' stroke='none'/>");
+    s.push("<path d='"+d+"' fill='none' stroke='#1d4ed8' stroke-width='2' stroke-linejoin='round'/>");
+
+    s.push("<text x='"+(mL+pw/2)+"' y='"+(H-6)+"' text-anchor='middle' font-size='12' fill='#64748b'>Days to liquidate (DTL)</text>");
+    s.push("<text transform='translate(14,"+(mT+ph/2)+") rotate(-90)' text-anchor='middle' font-size='12' fill='#64748b'>Cumulative portfolio weight (%)</text>");
+
+    wrap.innerHTML="<svg viewBox='0 0 "+W+" "+H+"' width='100%' preserveAspectRatio='xMidYMid meet' role='img' "
+      +"aria-label='Cumulative distribution of portfolio weight by days to liquidate'>"+s.join("")+"</svg>";
+
+    var beyond=totalPct-withinCap;
+    if(beyond>0.05){
+      note.innerHTML="<b>"+withinCap.toFixed(1)+"%</b> of the portfolio liquidates within "+trim(cap)
+        +" days; <b>"+beyond.toFixed(1)+"%</b> is held in securities that take longer (off-chart). "
+        +"The cap follows the largest &ldquo;Days to liquidate&rdquo; box above.";
+    }else{
+      note.innerHTML="The entire portfolio ("+totalPct.toFixed(1)+"%) liquidates within "+trim(cap)
+        +" days. The cap follows the largest &ldquo;Days to liquidate&rdquo; box above.";
+    }
+  }
+
+  /* round a raw tick interval up to a 1/2/5 ×10ⁿ "nice" number */
+  function niceStep(raw){
+    if(!(raw>0)) return 1;
+    var mag=Math.pow(10,Math.floor(Math.log(raw)/Math.LN10)), f=raw/mag;
+    return (f<1.5?1 : f<3?2 : f<7?5 : 10)*mag;
   }
 
   /* ---------- helpers ---------- */
