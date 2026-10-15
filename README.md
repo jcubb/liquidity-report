@@ -28,9 +28,11 @@ The report has five tabs:
   every fund in the file at once. Select all or any subset of funds (with a filter and
   a collapsible **Hide list / Show list** picker for large files) and see each fund's
   ticker, name, and AUM alongside its percent-liquid at each horizon. Columns are
-  click-to-sort. Every fund uses its own actual market value and the file's original
-  impact assumptions, so the figures reproduce the file; only the horizon days are
-  adjustable here, and the Report tab's overrides do not apply.
+  click-to-sort. Every fund uses its own actual market value; two shared stressors —
+  an **ADV assumption %** (scales each security's assumption, 100 = file originals)
+  and a **pro-rata percentile %** floor (0 = off, applied per fund) — apply uniformly
+  across all selected funds. At the defaults (ADV 100, pro-rata 0) the figures
+  reproduce the file. The Report tab's overrides do not apply here.
 - **Notes** — a plain-language explanation of the methodology.
 
 The report reads the OversightSummary worksheet and expects these columns:

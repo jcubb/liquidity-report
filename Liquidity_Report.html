@@ -262,6 +262,24 @@
       </div>
 
       <div class="card">
+        <div class="grid2">
+          <div>
+            <label for="mfAdv">ADV assumption %</label>
+            <input type="number" id="mfAdv" min="0.0001" step="5" value="100">
+            <div class="foot" style="margin-top:6px">Scales every security&rsquo;s own assumption
+              (100 = file originals &middot; 200 = double, &asymp;2&times; faster &middot; 25 = a quarter, &asymp;4&times; slower).
+              Applied uniformly to all funds.</div>
+          </div>
+          <div>
+            <label for="mfPro">Pro-rata percentile %</label>
+            <input type="number" id="mfPro" min="0" max="100" step="5" value="0">
+            <div class="foot" style="margin-top:6px">A &ldquo;near pro-rata&rdquo; floor applied per fund:
+              0 = off &middot; 100 = paced by each fund&rsquo;s slowest position.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <label>Days to liquidate</label>
         <div class="row" id="mfDayRow"></div>
       </div>
@@ -269,9 +287,10 @@
       <div class="card">
         <h3 style="margin:0 0 4px;font-size:15px">Portfolio Percent Liquid by Horizon &mdash; selected funds</h3>
         <div class="datawrap"><table class="datatbl" id="mfTbl"></table></div>
-        <div class="foot">Each fund runs at its own actual market value using the file&rsquo;s original
-          impact assumptions (reproducing the file). Only the horizon days above are adjustable here;
-          the Report tab&rsquo;s impact and market-value overrides do not apply.</div>
+        <div class="foot">Each fund runs at its own actual market value. At the defaults
+          (ADV&nbsp;100%, pro-rata&nbsp;0) every fund uses the file&rsquo;s original impact assumptions,
+          reproducing the file; the two stressors above scale the assumptions and apply a pro-rata floor
+          uniformly across all selected funds. The Report tab&rsquo;s overrides do not apply here.</div>
       </div>
     </div><!-- /panel-multifund -->
 
@@ -328,11 +347,14 @@
         <p><b>Multi-Fund tab</b> &mdash; runs the basic <i>Portfolio Percent Liquid by Horizon</i>
            calculation across every fund in the file at once. Select all or any subset of funds, and
            each selected fund is shown with its ticker, description, and market value (AUM) alongside
-           its percent-liquid at each horizon. Every fund uses its own actual market value and the
-           file&rsquo;s original impact assumptions, so the figures reproduce the file; only the
-           horizon days are adjustable here, and the Report tab&rsquo;s overrides do not apply.
-           Click any column header to sort the table by that column, and use <b>Hide&nbsp;list</b> /
-           <b>Show&nbsp;list</b> to collapse the fund picker when the file holds many funds.</p>
+           its percent-liquid at each horizon. Every fund uses its own actual market value. Two shared
+           stressors apply uniformly across all selected funds: an <b>ADV&nbsp;assumption&nbsp;%</b>
+           that scales every security&rsquo;s own impact assumption (100 = the file&rsquo;s originals),
+           and a <b>pro-rata percentile&nbsp;%</b> floor (0 = off) computed per fund. At the defaults
+           (ADV&nbsp;100%, pro-rata&nbsp;0) the figures reproduce the file; the Report tab&rsquo;s
+           overrides do not apply here. Click any column header to sort the table by that column, and
+           use <b>Hide&nbsp;list</b> / <b>Show&nbsp;list</b> to collapse the fund picker when the file
+           holds many funds.</p>
         <p class="foot">Because these figures come directly from the file&rsquo;s security weights, if
            those weights do not sum to exactly 100% the portfolio total can land slightly above or below
            100%. The <b>Data</b> tab shows the weight total and flags this.</p>
@@ -403,10 +425,22 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   /* Choose the right worksheet: prefer a sheet named "OversightSummary...",
      else the first sheet that actually has the required columns, else give up. */
   function normName(s){return String(s).toLowerCase().replace(/[^a-z]/g,"");}
+  /* Read just the header row from a worksheet's declared range — avoids converting the whole
+     sheet (potentially 100k+ rows) merely to inspect column names. The single full
+     sheet_to_json conversion happens once, in handleFile. */
+  function headerCells(ws){
+    var ref=ws && ws["!ref"];
+    if(!ref) return [];
+    var r=XLSX.utils.decode_range(ref), out=[];
+    for(var c=r.s.c;c<=r.e.c;c++){
+      var cell=ws[XLSX.utils.encode_cell({r:r.s.r,c:c})];
+      if(cell && cell.v!=null) out.push(String(cell.v));
+    }
+    return out;
+  }
   function sheetHasCols(wb,name){
-    var j=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:null});
-    if(!j.length) return false;
-    var have=Object.keys(j[0]);
+    var have=headerCells(wb.Sheets[name]);
+    if(!have.length) return false;
     return [COLS.fund,COLS.mv,COLS.pct,COLS.dtl,COLS.smi]
              .every(function(c){return have.indexOf(c)>=0;});
   }
@@ -620,6 +654,8 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     var hidden=$("mfSelectWrap").classList.toggle("hidden");
     this.textContent=hidden?"Show list":"Hide list";
   });
+  $("mfAdv").addEventListener("input",renderMfResults);         /* shared ADV-scale stressor */
+  $("mfPro").addEventListener("input",renderMfResults);         /* shared pro-rata floor */
 
   function setVisibleSelection(on){
     visibleMfCodes().forEach(function(code){ state.mfSelected[code]=on; });
@@ -831,12 +867,19 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   function renderMfResults(){
     var tbl=$("mfTbl"); if(!tbl) return;
     var days=[].slice.call(document.querySelectorAll('#mfDayRow input')).map(function(i){return num(i.value);});
-    var origFactor=function(){return 1;};
+
+    /* shared stressors applied uniformly to every fund: ADV-scale (scale-each semantics, 100 =
+       file originals) and a pro-rata percentile floor (0 = off), the latter computed per fund. */
+    var adv=parseFloat(String($("mfAdv").value).replace(/[,\s%]/g,""));
+    var pro=parseFloat(String($("mfPro").value).replace(/[,\s%]/g,""));
+    var factorOf=(isFinite(adv)&&adv>0)?function(){return 100/adv;}:function(){return 1;};
+    if(!(isFinite(pro)&&pro>0)) pro=0;
 
     /* one record per selected fund: ticker, description, AUM, and % liquid at each horizon */
     var data=state.funds.filter(function(c){return state.mfSelected[c];}).map(function(code){
+      var rows=state.byFund[code], floorDtl=floorDtlAtPct(rows,pro);
       return {code:code, desc:state.codeToDesc[code], aum:state.fundTotals[code],
-              pcts:days.map(function(X){return pctLiquid(state.byFund[code],X,origFactor,1);})};
+              pcts:days.map(function(X){return pctLiquid(rows,X,factorOf,1,floorDtl);})};
     });
 
     /* columns: fixed ticker/fund/AUM + one per horizon box. Horizon keys are h0..hN so a
