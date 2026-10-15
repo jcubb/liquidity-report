@@ -39,6 +39,15 @@
   .fundsearch .clear-cell{display:flex;align-items:flex-end}
   .fundsearch #fundCount{margin-top:6px}
   #fundSearchClear{font-size:15px;padding:8px 16px}   /* match input metrics → equal height */
+  /* Multi-Fund tab: scrollable checkbox list of funds */
+  .mflist{margin-top:14px;max-height:34vh;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .mfitem{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+  .mfitem:last-child{border-bottom:none}
+  .mfitem:hover{background:var(--accent-soft)}
+  .mfitem.hidden{display:none!important}
+  .mfitem input{width:auto;margin:0}
+  .mfitem .mf-code{font-weight:600;min-width:72px}
+  .mfitem .mf-desc{color:#334155;font-size:14px}
   .btn:disabled{opacity:.45;cursor:default}
   .btn:disabled:hover{background:#fff}
   .row{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
@@ -108,6 +117,7 @@
       <button class="tab active" data-tab="report" type="button">Report</button>
       <button class="tab" data-tab="scenarios" type="button">Scenarios</button>
       <button class="tab" data-tab="data" type="button">Data</button>
+      <button class="tab" data-tab="multifund" type="button">Multi-Fund</button>
       <button class="tab" data-tab="notes" type="button">Notes</button>
     </div>
 
@@ -228,6 +238,43 @@
       </div>
     </div>
 
+    <div id="panel-multifund" class="panel hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <div id="mfCount" class="foot" style="margin:0"></div>
+          <button id="mfToggle" class="btn" type="button">Hide list</button>
+        </div>
+        <div id="mfSelectWrap">
+          <div class="fundsearch" style="margin-top:12px">
+            <div class="grid2">
+              <div>
+                <label for="mfSearch">Filter funds</label>
+                <input id="mfSearch" type="text" placeholder="filter by name or ticker&hellip;" autocomplete="off">
+              </div>
+              <div class="clear-cell" style="gap:8px">
+                <button id="mfSelectAll" class="btn" type="button">Select all</button>
+                <button id="mfClearAll" class="btn" type="button">Clear all</button>
+              </div>
+            </div>
+          </div>
+          <div class="mflist" id="mfFundList"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label>Days to liquidate</label>
+        <div class="row" id="mfDayRow"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 4px;font-size:15px">Portfolio Percent Liquid by Horizon &mdash; selected funds</h3>
+        <div class="datawrap"><table class="datatbl" id="mfTbl"></table></div>
+        <div class="foot">Each fund runs at its own actual market value using the file&rsquo;s original
+          impact assumptions (reproducing the file). Only the horizon days above are adjustable here;
+          the Report tab&rsquo;s impact and market-value overrides do not apply.</div>
+      </div>
+    </div><!-- /panel-multifund -->
+
     <div id="panel-notes" class="panel hidden">
       <div class="card">
         <h3 style="margin:0 0 8px;font-size:15px">How these figures are calculated</h3>
@@ -278,6 +325,14 @@
            interpolation) from the security at or just above the percentile. <b>0</b> turns the floor
            off (results match the plain calculation); values approaching <b>100</b> approach pure
            pro-rata, where the slowest position governs the entire book.</p>
+        <p><b>Multi-Fund tab</b> &mdash; runs the basic <i>Portfolio Percent Liquid by Horizon</i>
+           calculation across every fund in the file at once. Select all or any subset of funds, and
+           each selected fund is shown with its ticker, description, and market value (AUM) alongside
+           its percent-liquid at each horizon. Every fund uses its own actual market value and the
+           file&rsquo;s original impact assumptions, so the figures reproduce the file; only the
+           horizon days are adjustable here, and the Report tab&rsquo;s overrides do not apply.
+           Click any column header to sort the table by that column, and use <b>Hide&nbsp;list</b> /
+           <b>Show&nbsp;list</b> to collapse the fund picker when the file holds many funds.</p>
         <p class="foot">Because these figures come directly from the file&rsquo;s security weights, if
            those weights do not sum to exactly 100% the portfolio total can land slightly above or below
            100%. The <b>Data</b> tab shows the weight total and flags this.</p>
@@ -318,10 +373,11 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   var COLS={fund:"fund",desc:"fund_description",mv:"market_value",
             pct:"market_value__pct",dtl:"days_to_liquidate",smi:"significant_market_impact"};
   var DEFAULT_DAYS=[1,2,3,4,5,10,20];
-  var SCEN_DEFAULTS=[[100,1,0],[100,1,95],[25,1,0],[25,1,95]];   /* [ADV assumption %, fund size ×, pro-rata percentile %] */
+  var SCEN_DEFAULTS=[[100,1,0],[100,1,90],[25,1,0],[25,1,90]];   /* [ADV assumption %, fund size ×, pro-rata percentile %] */
 
   var state={rows:[],funds:[],byFund:{},codeToDesc:{},descToCode:{},
-             fundTotals:{},current:null,dataSort:{col:null,dir:1}};
+             fundTotals:{},current:null,dataSort:{col:null,dir:1},
+             mfSelected:{},mfSort:{col:null,dir:1}};
 
   var $=function(id){return document.getElementById(id);};
 
@@ -453,6 +509,24 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
       wrap.appendChild(lab); wrap.appendChild(inp); sdr.appendChild(wrap);
     });
 
+    /* Multi-Fund tab: its own day boxes (independent of Report's) */
+    var mdr=$("mfDayRow"); mdr.innerHTML="";
+    DEFAULT_DAYS.forEach(function(v,i){
+      var wrap=document.createElement("div"); wrap.className="daybox";
+      var lab=document.createElement("label"); lab.textContent="Box "+(i+1);
+      var inp=document.createElement("input");
+      inp.type="number"; inp.min="0"; inp.step="1"; inp.value=v;
+      inp.addEventListener("input",renderMfResults);
+      wrap.appendChild(lab); wrap.appendChild(inp); mdr.appendChild(wrap);
+    });
+
+    /* Multi-Fund tab: start with every fund selected; rebuild the checkbox list */
+    state.mfSelected={};
+    state.funds.forEach(function(code){ state.mfSelected[code]=true; });
+    $("mfSearch").value="";
+    renderMfList();
+    renderMfResults();   /* build the table now so a file loaded while on this tab isn't stale */
+
     /* Scenarios tab: 4 editable rows of [ADV assumption %, fund size ×, pro-rata percentile %] + result cells */
     var sb=$("scenBody"); sb.innerHTML="";
     SCEN_DEFAULTS.forEach(function(trip){
@@ -522,7 +596,7 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     b.addEventListener("click",function(){ showTab(b.dataset.tab); });
   });
   function showTab(name){
-    ["report","scenarios","data","notes"].forEach(function(t){
+    ["report","scenarios","data","multifund","notes"].forEach(function(t){
       $("panel-"+t).classList.toggle("hidden", t!==name);
     });
     [].slice.call(document.querySelectorAll(".tab")).forEach(function(b){
@@ -530,6 +604,34 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     });
     if(name==="data") renderData(state.current);
     if(name==="scenarios") recalcScenarios();
+    if(name==="multifund") renderMfResults();
+  }
+
+  /* Multi-Fund controls: a search filters which checkboxes are visible; Select all / Clear all
+     act on the currently visible (filtered) funds so you can filter, then bulk-toggle that subset. */
+  $("mfSearch").addEventListener("input",renderMfList);
+  $("mfSearch").addEventListener("focus",function(){this.select();});
+  $("mfSearch").addEventListener("keydown",function(e){
+    if(e.key==="Escape"){ this.value=""; renderMfList(); }
+  });
+  $("mfSelectAll").addEventListener("click",function(){ setVisibleSelection(true); });
+  $("mfClearAll").addEventListener("click",function(){ setVisibleSelection(false); });
+  $("mfToggle").addEventListener("click",function(){            /* collapse the whole picker for long fund lists */
+    var hidden=$("mfSelectWrap").classList.toggle("hidden");
+    this.textContent=hidden?"Show list":"Hide list";
+  });
+
+  function setVisibleSelection(on){
+    visibleMfCodes().forEach(function(code){ state.mfSelected[code]=on; });
+    renderMfList(); renderMfResults();
+  }
+  /* funds matching the current Multi-Fund search box (all funds when the box is empty) */
+  function visibleMfCodes(){
+    var q=$("mfSearch").value.trim().toLowerCase();
+    return state.funds.filter(function(code){
+      return !q || code.toLowerCase().indexOf(q)>=0
+                || state.codeToDesc[code].toLowerCase().indexOf(q)>=0;
+    });
   }
 
   $("csvBtn").addEventListener("click",function(){
@@ -687,6 +789,101 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     }
     recalc();
     recalcScenarios();
+  }
+
+  /* ---------- Multi-Fund tab ---------- */
+  /* Checkbox list of every fund (ticker — description), filtered by #mfSearch. Selection state
+     lives in state.mfSelected keyed by code and persists across filtering. Toggling a box updates
+     the selection and the results table; the filter only hides/shows rows, it does not deselect. */
+  function renderMfList(){
+    var list=$("mfFundList"); if(!list) return;
+    var vis=visibleMfCodes(), visSet={};
+    vis.forEach(function(c){visSet[c]=true;});
+    list.innerHTML="";
+    state.funds.forEach(function(code){
+      var lab=document.createElement("label");
+      lab.className="mfitem"+(visSet[code]?"":" hidden");
+      var cb=document.createElement("input"); cb.type="checkbox";
+      cb.checked=!!state.mfSelected[code]; cb.value=code;
+      cb.addEventListener("change",function(){
+        state.mfSelected[code]=cb.checked; updateMfCount(); renderMfResults();
+      });
+      var c=document.createElement("span"); c.className="mf-code"; c.textContent=code;
+      var d=document.createElement("span"); d.className="mf-desc"; d.textContent=state.codeToDesc[code];
+      lab.appendChild(cb); lab.appendChild(c); lab.appendChild(d);
+      list.appendChild(lab);
+    });
+    updateMfCount();
+  }
+  function updateMfCount(){
+    var total=state.funds.length;
+    var sel=state.funds.filter(function(c){return state.mfSelected[c];}).length;
+    var q=$("mfSearch").value.trim();
+    var shown=visibleMfCodes().length;
+    $("mfCount").textContent=sel+" of "+total+" fund"+(total===1?"":"s")+" selected"
+      +(q?" · showing "+shown+" matching “"+q+"”":"");
+  }
+
+  /* Results table: one row per selected fund — ticker, description, AUM, then % liquid at each
+     horizon. Each fund runs at its own actual market value with the file's original impact
+     assumptions (factor 1, mScale 1), i.e. the same basic calculation the Report tab shows at
+     its defaults. Only the Multi-Fund horizon boxes feed this. */
+  function renderMfResults(){
+    var tbl=$("mfTbl"); if(!tbl) return;
+    var days=[].slice.call(document.querySelectorAll('#mfDayRow input')).map(function(i){return num(i.value);});
+    var origFactor=function(){return 1;};
+
+    /* one record per selected fund: ticker, description, AUM, and % liquid at each horizon */
+    var data=state.funds.filter(function(c){return state.mfSelected[c];}).map(function(code){
+      return {code:code, desc:state.codeToDesc[code], aum:state.fundTotals[code],
+              pcts:days.map(function(X){return pctLiquid(state.byFund[code],X,origFactor,1);})};
+    });
+
+    /* columns: fixed ticker/fund/AUM + one per horizon box. Horizon keys are h0..hN so a
+       sort survives horizon-day edits (same count of boxes each time). */
+    var cols=[{k:"ticker",label:"Ticker",txt:true},{k:"fund",label:"Fund",txt:true},{k:"aum",label:"AUM"}];
+    days.forEach(function(X,i){ cols.push({k:"h"+i,label:X+(X==1?" day":" days")}); });
+
+    /* click-to-sort (same pattern as the Data tab): text columns compare as strings, the rest numerically */
+    var s=state.mfSort;
+    if(s.col){
+      data.sort(function(a,b){
+        var cmp;
+        if(s.col==="ticker")      cmp=a.code.localeCompare(b.code);
+        else if(s.col==="fund")   cmp=a.desc.localeCompare(b.desc);
+        else if(s.col==="aum")    cmp=a.aum-b.aum;
+        else                      cmp=a.pcts[+s.col.slice(1)]-b.pcts[+s.col.slice(1)];
+        return cmp*s.dir;
+      });
+    }
+
+    var html="<thead><tr>";
+    cols.forEach(function(c){
+      var arrow=(s.col===c.k)?(s.dir>0?" ▲":" ▼"):"";
+      html+="<th class='"+(c.txt?"txt":"")+"' data-k='"+c.k+"'>"+esc(c.label)+arrow+"</th>";
+    });
+    html+="</tr></thead><tbody>";
+    if(!data.length){
+      html+="<tr><td class='txt' colspan='"+cols.length+"'>No funds selected.</td></tr>";
+    }else{
+      data.forEach(function(d){
+        html+="<tr><td class='txt'>"+esc(d.code)+"</td><td class='txt'>"+esc(d.desc)
+             +"</td><td>"+fmtMoney(d.aum)+"</td>";
+        d.pcts.forEach(function(p){ html+="<td>"+p.toFixed(1)+"%</td>"; });
+        html+="</tr>";
+      });
+    }
+    html+="</tbody>";
+    tbl.innerHTML=html;
+
+    [].slice.call(tbl.querySelectorAll("th")).forEach(function(th){
+      th.addEventListener("click",function(){
+        var k=th.dataset.k;
+        if(state.mfSort.col===k) state.mfSort.dir*=-1;
+        else state.mfSort={col:k,dir:1};
+        renderMfResults();
+      });
+    });
   }
 
   /* ---------- calculation ---------- */

@@ -12,14 +12,25 @@ HTML file and drag in a holdings export.
 3. Pick a fund (by description or fund ticker), then adjust parameters — the report
    recalculates live.
 
-The report has three tabs:
+The report has five tabs:
 
 - **Report** — the fund selector, parameters, and the *Portfolio Percent Liquid by
   Horizon* table.
+- **Scenarios** — the selected fund run under four side-by-side scenarios, each set
+  by an ADV-assumption %, a fund-size multiplier, and an optional *pro-rata percentile*
+  floor; independent horizon boxes. Always starts from the file's original values
+  (Report-tab overrides don't carry over).
 - **Data** — the selected fund's securities at row level (sortable), including
   `asset_class`, `liquidity_methodology`, and `liquidation_size`, with a totals
   footer that flags when the security weights don't sum to 100%. Includes a
   **Download CSV** button.
+- **Multi-Fund** — the *Portfolio Percent Liquid by Horizon* calculation run across
+  every fund in the file at once. Select all or any subset of funds (with a filter and
+  a collapsible **Hide list / Show list** picker for large files) and see each fund's
+  ticker, name, and AUM alongside its percent-liquid at each horizon. Columns are
+  click-to-sort. Every fund uses its own actual market value and the file's original
+  impact assumptions, so the figures reproduce the file; only the horizon days are
+  adjustable here, and the Report tab's overrides do not apply.
 - **Notes** — a plain-language explanation of the methodology.
 
 The report reads the OversightSummary worksheet and expects these columns:
