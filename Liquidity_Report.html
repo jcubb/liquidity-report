@@ -85,6 +85,19 @@
   .err{color:#b91c1c;font-size:14px;margin-top:10px}
   .pill{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:999px;
         padding:2px 10px;font-size:12px;font-weight:600}
+  /* CDF charts: legend (multi-series only), hover crosshair + tooltip */
+  .cdf-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 8px;font-size:12px;color:#334155}
+  .cdf-legend span{display:inline-flex;align-items:center;gap:6px}
+  .cdf-plot{position:relative}
+  .cdf-tip{position:absolute;top:10px;pointer-events:none;background:#fff;border:1px solid var(--line);
+           border-radius:8px;padding:7px 10px;font-size:12px;color:#334155;white-space:nowrap;
+           box-shadow:0 2px 8px rgba(15,23,42,.12);font-variant-numeric:tabular-nums}
+  .cdf-tip b{color:var(--ink)}
+  .cdf-tip .r{display:flex;align-items:center;gap:6px;margin-top:3px}
+  /* Aggregate tab: per-fund size inputs, combined row emphasis */
+  #agSizeTbl input{font-size:13px;padding:5px 8px;text-align:right;max-width:150px;margin-left:auto;display:block}
+  #agSizeTbl input.mult{max-width:80px}
+  #agTbl tr.combined td{font-weight:700;color:var(--accent);background:var(--accent-soft)}
 </style>
 </head>
 <body>
@@ -118,6 +131,7 @@
       <button class="tab" data-tab="scenarios" type="button">Scenarios</button>
       <button class="tab" data-tab="data" type="button">Data</button>
       <button class="tab" data-tab="multifund" type="button">Multi-Fund</button>
+      <button class="tab" data-tab="aggregate" type="button">Aggregate</button>
       <button class="tab" data-tab="notes" type="button">Notes</button>
     </div>
 
@@ -225,6 +239,14 @@
           position. Scenarios always start from the file&rsquo;s original values for the selected
           fund &mdash; the Report tab&rsquo;s overrides do not apply here.</div>
       </div>
+      <div class="card">
+        <h3 style="margin:0 0 2px;font-size:15px">Liquidity Distribution by Scenario &mdash; Cumulative Portfolio Weight by Days to Liquidate</h3>
+        <div class="foot" style="margin:0 0 10px">Share of the portfolio held in securities that fully liquidate within a
+          given number of days, using each scenario&rsquo;s stressed days-to-liquidate (ADV %, fund size, pro-rata floor).
+          A pro-rata floor shows as a vertical jump: every faster holding is paced up to the floor.</div>
+        <div id="scCdfWrap"></div>
+        <div class="foot" id="scCdfNote"></div>
+      </div>
     </div><!-- /panel-scenarios -->
 
     <div id="panel-data" class="panel hidden">
@@ -294,6 +316,76 @@
       </div>
     </div><!-- /panel-multifund -->
 
+    <div id="panel-aggregate" class="panel hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <div id="agCount" class="foot" style="margin:0"></div>
+          <button id="agToggle" class="btn" type="button">Hide list</button>
+        </div>
+        <div id="agSelectWrap">
+          <div class="fundsearch" style="margin-top:12px">
+            <div class="grid2">
+              <div>
+                <label for="agSearch">Filter funds</label>
+                <input id="agSearch" type="text" placeholder="filter by name or ticker&hellip;" autocomplete="off">
+              </div>
+              <div class="clear-cell" style="gap:8px">
+                <button id="agSelectAll" class="btn" type="button">Select all</button>
+                <button id="agClearAll" class="btn" type="button">Clear all</button>
+              </div>
+            </div>
+          </div>
+          <div class="mflist" id="agFundList"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <h3 style="margin:0;font-size:15px">Fund sizes</h3>
+          <button id="agResetSizes" class="btn" type="button">Reset all to actual</button>
+        </div>
+        <div class="datawrap" style="max-height:40vh"><table class="datatbl" id="agSizeTbl"></table></div>
+        <div class="foot">Set each fund&rsquo;s size with either box &mdash; the multiplier and the dollar
+          amount are linked. A larger fund holds proportionally larger positions, so it takes longer to liquidate.</div>
+      </div>
+
+      <div class="card">
+        <div class="grid2">
+          <div>
+            <label for="agAdv">ADV assumption %</label>
+            <input type="number" id="agAdv" min="0.0001" step="5" value="100">
+            <div class="foot" style="margin-top:6px">Scales every security&rsquo;s own assumption
+              (100 = file originals &middot; 25 = a quarter, &asymp;4&times; slower).</div>
+          </div>
+          <div>
+            <label for="agPro">Pro-rata percentile %</label>
+            <input type="number" id="agPro" min="0" max="100" step="5" value="0">
+            <div class="foot" style="margin-top:6px">Combined row: floor taken from the <b>combined</b>
+              portfolio&rsquo;s distribution. Fund rows: each fund&rsquo;s own floor. 0 = off.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label>Days to liquidate</label>
+        <div class="row" id="agDayRow"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 4px;font-size:15px">Portfolio Percent Liquid by Horizon &mdash; combined portfolio</h3>
+        <div class="datawrap"><table class="datatbl" id="agTbl"></table></div>
+        <div class="foot" id="agOverlap"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin:0 0 2px;font-size:15px">Combined Liquidity Distribution &mdash; Cumulative Portfolio Weight by Days to Liquidate</h3>
+        <div class="foot" style="margin:0 0 10px">Share of the combined portfolio held in securities that fully
+          liquidate within a given number of days, after merging shared holdings and applying the stressors above.</div>
+        <div id="agCdfWrap"></div>
+        <div class="foot" id="agCdfNote"></div>
+      </div>
+    </div><!-- /panel-aggregate -->
+
     <div id="panel-notes" class="panel hidden">
       <div class="card">
         <h3 style="margin:0 0 8px;font-size:15px">How these figures are calculated</h3>
@@ -355,6 +447,21 @@
            overrides do not apply here. Click any column header to sort the table by that column, and
            use <b>Hide&nbsp;list</b> / <b>Show&nbsp;list</b> to collapse the fund picker when the file
            holds many funds.</p>
+        <p>The <b>Scenarios</b> tab also charts each scenario&rsquo;s liquidity distribution: the share
+           of the portfolio held in securities whose stressed days-to-liquidate is at or below a given
+           number of days. With a pro-rata floor, every holding faster than the floor is drawn at the floor,
+           so the line jumps there.</p>
+        <p><b>Aggregate tab</b> &mdash; treats the selected funds as <i>one combined portfolio</i>. Each
+           fund can be resized (a multiplier or a dollar amount; the two are linked). Holdings that appear
+           in more than one fund are <b>merged</b> &mdash; matched on CUSIP, then ISIN, then ticker &mdash;
+           because they compete for the same trading volume: the combined position&rsquo;s days to
+           liquidate is the sum of each fund&rsquo;s (resized) days to liquidate in that security, and its
+           weight is its combined dollar value over the combined portfolio&rsquo;s value. Holdings with no
+           identifier are kept separate. If the same security carries different impact assumptions in
+           different funds, the funds&rsquo; positions are restated at the assumption of the largest
+           position before being added. The table&rsquo;s first row is the combined portfolio, with the
+           pro-rata floor taken from the combined distribution; the rows below show each fund on its own
+           at its chosen size, for comparison.</p>
         <p class="foot">Because these figures come directly from the file&rsquo;s security weights, if
            those weights do not sum to exactly 100% the portfolio total can land slightly above or below
            100%. The <b>Data</b> tab shows the weight total and flags this.</p>
@@ -397,9 +504,15 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   var DEFAULT_DAYS=[1,2,3,4,5,10,20];
   var SCEN_DEFAULTS=[[100,1,0],[100,1,90],[25,1,0],[25,1,90]];   /* [ADV assumption %, fund size ×, pro-rata percentile %] */
 
+  /* chart series styling: fixed categorical order (validated palette) + a dash per slot as a
+     secondary encoding, since slots 3-4 are below 3:1 contrast on white */
+  var SERIES_COLORS=["#2a78d6","#eb6834","#1baf7a","#eda100"];
+  var SERIES_DASH=["","7 4","2 3","10 3 2 3"];
+
   var state={rows:[],funds:[],byFund:{},codeToDesc:{},descToCode:{},
              fundTotals:{},current:null,dataSort:{col:null,dir:1},
-             mfSelected:{},mfSort:{col:null,dir:1}};
+             mfSelected:{},mfSort:{col:null,dir:1},
+             agSelected:{},agScale:{}};
 
   var $=function(id){return document.getElementById(id);};
 
@@ -554,17 +667,39 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
       wrap.appendChild(lab); wrap.appendChild(inp); mdr.appendChild(wrap);
     });
 
+    /* Aggregate tab: its own day boxes */
+    var adr=$("agDayRow"); adr.innerHTML="";
+    DEFAULT_DAYS.forEach(function(v,i){
+      var wrap=document.createElement("div"); wrap.className="daybox";
+      var lab=document.createElement("label"); lab.textContent="Box "+(i+1);
+      var inp=document.createElement("input");
+      inp.type="number"; inp.min="0"; inp.step="1"; inp.value=v;
+      inp.addEventListener("input",renderAgResults);
+      wrap.appendChild(lab); wrap.appendChild(inp); adr.appendChild(wrap);
+    });
+
     /* Multi-Fund tab: start with every fund selected; rebuild the checkbox list */
     state.mfSelected={};
     state.funds.forEach(function(code){ state.mfSelected[code]=true; });
     $("mfSearch").value="";
-    renderMfList();
+    mfPicker.render();
     renderMfResults();   /* build the table now so a file loaded while on this tab isn't stale */
+
+    /* Aggregate tab: every fund selected at its actual size (scale 1) */
+    state.agSelected={}; state.agScale={};
+    state.funds.forEach(function(code){ state.agSelected[code]=true; state.agScale[code]=1; });
+    $("agSearch").value="";
+    agPicker.render();
+    renderAgSizes();
+    renderAgResults();
 
     /* Scenarios tab: 4 editable rows of [ADV assumption %, fund size ×, pro-rata percentile %] + result cells */
     var sb=$("scenBody"); sb.innerHTML="";
-    SCEN_DEFAULTS.forEach(function(trip){
+    SCEN_DEFAULTS.forEach(function(trip,k){
       var tr=document.createElement("tr");
+      var sw=document.createElement("td");               /* line swatch keying this row to the chart */
+      sw.innerHTML=lineSwatch(SERIES_COLORS[k],SERIES_DASH[k]);
+      tr.appendChild(sw);
       trip.forEach(function(v,j){
         var td=document.createElement("td");
         var inp=document.createElement("input");
@@ -630,7 +765,7 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     b.addEventListener("click",function(){ showTab(b.dataset.tab); });
   });
   function showTab(name){
-    ["report","scenarios","data","multifund","notes"].forEach(function(t){
+    ["report","scenarios","data","multifund","aggregate","notes"].forEach(function(t){
       $("panel-"+t).classList.toggle("hidden", t!==name);
     });
     [].slice.call(document.querySelectorAll(".tab")).forEach(function(b){
@@ -639,35 +774,71 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     if(name==="data") renderData(state.current);
     if(name==="scenarios") recalcScenarios();
     if(name==="multifund") renderMfResults();
+    if(name==="aggregate") renderAgResults();
   }
 
-  /* Multi-Fund controls: a search filters which checkboxes are visible; Select all / Clear all
-     act on the currently visible (filtered) funds so you can filter, then bulk-toggle that subset. */
-  $("mfSearch").addEventListener("input",renderMfList);
-  $("mfSearch").addEventListener("focus",function(){this.select();});
-  $("mfSearch").addEventListener("keydown",function(e){
-    if(e.key==="Escape"){ this.value=""; renderMfList(); }
-  });
-  $("mfSelectAll").addEventListener("click",function(){ setVisibleSelection(true); });
-  $("mfClearAll").addEventListener("click",function(){ setVisibleSelection(false); });
-  $("mfToggle").addEventListener("click",function(){            /* collapse the whole picker for long fund lists */
-    var hidden=$("mfSelectWrap").classList.toggle("hidden");
-    this.textContent=hidden?"Show list":"Hide list";
-  });
+  /* Fund pickers (Multi-Fund, Aggregate): a search filters which checkboxes are visible; Select
+     all / Clear all act on the currently visible (filtered) funds so you can filter, then
+     bulk-toggle that subset. Element ids share a prefix ("mf" / "ag"); sel() returns the tab's
+     selection map (re-created on each file load, hence a getter); onChange fires on any selection change. */
+  var mfPicker=makePicker("mf",function(){return state.mfSelected;},renderMfResults);
+  var agPicker=makePicker("ag",function(){return state.agSelected;},function(){ renderAgSizes(); renderAgResults(); });
   $("mfAdv").addEventListener("input",renderMfResults);         /* shared ADV-scale stressor */
   $("mfPro").addEventListener("input",renderMfResults);         /* shared pro-rata floor */
+  $("agAdv").addEventListener("input",renderAgResults);
+  $("agPro").addEventListener("input",renderAgResults);
+  $("agResetSizes").addEventListener("click",function(){
+    state.funds.forEach(function(code){ state.agScale[code]=1; });
+    renderAgSizes(); renderAgResults();
+  });
 
-  function setVisibleSelection(on){
-    visibleMfCodes().forEach(function(code){ state.mfSelected[code]=on; });
-    renderMfList(); renderMfResults();
-  }
-  /* funds matching the current Multi-Fund search box (all funds when the box is empty) */
-  function visibleMfCodes(){
-    var q=$("mfSearch").value.trim().toLowerCase();
-    return state.funds.filter(function(code){
-      return !q || code.toLowerCase().indexOf(q)>=0
-                || state.codeToDesc[code].toLowerCase().indexOf(q)>=0;
+  function makePicker(p,sel,onChange){
+    var search=$(p+"Search");
+    function visible(){              /* funds matching the search box (all funds when it's empty) */
+      var q=search.value.trim().toLowerCase();
+      return state.funds.filter(function(code){
+        return !q || code.toLowerCase().indexOf(q)>=0
+                  || state.codeToDesc[code].toLowerCase().indexOf(q)>=0;
+      });
+    }
+    function updateCount(){
+      var total=state.funds.length, s=sel();
+      var n=state.funds.filter(function(c){return s[c];}).length;
+      var q=search.value.trim();
+      $(p+"Count").textContent=n+" of "+total+" fund"+(total===1?"":"s")+" selected"
+        +(q?" · showing "+visible().length+" matching “"+q+"”":"");
+    }
+    /* Checkbox list of every fund (ticker — description). Selection persists across filtering;
+       the filter only hides/shows rows, it does not deselect. */
+    function render(){
+      var list=$(p+"FundList"), visSet={};
+      visible().forEach(function(c){visSet[c]=true;});
+      list.innerHTML="";
+      state.funds.forEach(function(code){
+        var lab=document.createElement("label");
+        lab.className="mfitem"+(visSet[code]?"":" hidden");
+        var cb=document.createElement("input"); cb.type="checkbox";
+        cb.checked=!!sel()[code]; cb.value=code;
+        cb.addEventListener("change",function(){ sel()[code]=cb.checked; updateCount(); onChange(); });
+        var c=document.createElement("span"); c.className="mf-code"; c.textContent=code;
+        var d=document.createElement("span"); d.className="mf-desc"; d.textContent=state.codeToDesc[code];
+        lab.appendChild(cb); lab.appendChild(c); lab.appendChild(d);
+        list.appendChild(lab);
+      });
+      updateCount();
+    }
+    function setVisible(on){ visible().forEach(function(code){ sel()[code]=on; }); render(); onChange(); }
+
+    search.addEventListener("input",render);
+    search.addEventListener("focus",function(){this.select();});
+    search.addEventListener("keydown",function(e){ if(e.key==="Escape"){ this.value=""; render(); } });
+    $(p+"SelectAll").addEventListener("click",function(){ setVisible(true); });
+    $(p+"ClearAll").addEventListener("click",function(){ setVisible(false); });
+    $(p+"Toggle").addEventListener("click",function(){            /* collapse the picker for long fund lists */
+      var hidden=$(p+"SelectWrap").classList.toggle("hidden");
+      this.textContent=hidden?"Show list":"Hide list";
     });
+    return {render:render};
   }
 
   $("csvBtn").addEventListener("click",function(){
@@ -828,38 +999,6 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   }
 
   /* ---------- Multi-Fund tab ---------- */
-  /* Checkbox list of every fund (ticker — description), filtered by #mfSearch. Selection state
-     lives in state.mfSelected keyed by code and persists across filtering. Toggling a box updates
-     the selection and the results table; the filter only hides/shows rows, it does not deselect. */
-  function renderMfList(){
-    var list=$("mfFundList"); if(!list) return;
-    var vis=visibleMfCodes(), visSet={};
-    vis.forEach(function(c){visSet[c]=true;});
-    list.innerHTML="";
-    state.funds.forEach(function(code){
-      var lab=document.createElement("label");
-      lab.className="mfitem"+(visSet[code]?"":" hidden");
-      var cb=document.createElement("input"); cb.type="checkbox";
-      cb.checked=!!state.mfSelected[code]; cb.value=code;
-      cb.addEventListener("change",function(){
-        state.mfSelected[code]=cb.checked; updateMfCount(); renderMfResults();
-      });
-      var c=document.createElement("span"); c.className="mf-code"; c.textContent=code;
-      var d=document.createElement("span"); d.className="mf-desc"; d.textContent=state.codeToDesc[code];
-      lab.appendChild(cb); lab.appendChild(c); lab.appendChild(d);
-      list.appendChild(lab);
-    });
-    updateMfCount();
-  }
-  function updateMfCount(){
-    var total=state.funds.length;
-    var sel=state.funds.filter(function(c){return state.mfSelected[c];}).length;
-    var q=$("mfSearch").value.trim();
-    var shown=visibleMfCodes().length;
-    $("mfCount").textContent=sel+" of "+total+" fund"+(total===1?"":"s")+" selected"
-      +(q?" · showing "+shown+" matching “"+q+"”":"");
-  }
-
   /* Results table: one row per selected fund — ticker, description, AUM, then % liquid at each
      horizon. Each fund runs at its own actual market value with the file's original impact
      assumptions (factor 1, mScale 1), i.e. the same basic calculation the Report tab shows at
@@ -927,6 +1066,147 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
         renderMfResults();
       });
     });
+  }
+
+  /* ---------- Aggregate tab ---------- */
+  function agCodes(){ return state.funds.filter(function(c){return state.agSelected[c];}); }
+
+  /* Per-fund size inputs: a multiplier and a dollar amount, linked through state.agScale (the
+     multiplier is the stored value). Rebuilt only when the selection changes or sizes are reset —
+     never from renderAgResults — so typing in a box doesn't lose focus. */
+  function renderAgSizes(){
+    var tbl=$("agSizeTbl"), codes=agCodes();
+    var html="<thead><tr><th class='txt'>Ticker</th><th class='txt'>Fund</th><th>Actual AUM</th>"
+            +"<th>Size &times;</th><th>Sized AUM</th></tr></thead><tbody>";
+    if(!codes.length) html+="<tr><td class='txt' colspan='5'>No funds selected.</td></tr>";
+    codes.forEach(function(code){
+      var s=state.agScale[code], aum=state.fundTotals[code];
+      html+="<tr data-code='"+esc(code)+"'><td class='txt'>"+esc(code)+"</td><td class='txt'>"
+           +esc(state.codeToDesc[code])+"</td><td>"+fmtMoney(aum)+"</td>"
+           +"<td><input class='mult' type='number' min='0' step='0.1' value='"+trim(s)+"'></td>"
+           +"<td><input class='usd' type='text' inputmode='numeric' value='"+fmtNum(s*aum)+"'></td></tr>";
+    });
+    html+="</tbody><tfoot><tr><td class='txt' colspan='2'>Total ("+codes.length+")</td>"
+         +"<td id='agAumActual'></td><td></td><td id='agAumSized'></td></tr></tfoot>";
+    tbl.innerHTML=html;
+
+    [].slice.call(tbl.querySelectorAll("tbody tr[data-code]")).forEach(function(tr){
+      var code=tr.dataset.code, aum=state.fundTotals[code];
+      var mi=tr.querySelector("input.mult"), ui=tr.querySelector("input.usd");
+      mi.addEventListener("input",function(){
+        var v=parseFloat(mi.value); state.agScale[code]=(isFinite(v)&&v>=0)?v:0;
+        ui.value=fmtNum(state.agScale[code]*aum); renderAgResults();
+      });
+      ui.addEventListener("input",function(){
+        state.agScale[code]=aum>0?num(ui.value)/aum:0;
+        mi.value=trim(state.agScale[code]); renderAgResults();
+      });
+      ui.addEventListener("change",function(){ ui.value=fmtNum(state.agScale[code]*aum); });  /* commas on blur */
+    });
+  }
+
+  /* Security identity for merging across funds: CUSIP, then ISIN, then ticker. Rows with none
+     return null and are never merged. */
+  function secKey(r){
+    var ids=["cusip","isin","ticker"];
+    for(var i=0;i<ids.length;i++){
+      var v=r[ids[i]];
+      if(v!=null && String(v).trim()!=="") return ids[i]+":"+String(v).trim().toUpperCase();
+    }
+    return null;
+  }
+
+  /* Combine the selected funds (each resized by scales[code]) into ONE portfolio, merging
+     positions in the same security. DTL is proportional to position size for a given ADV, so a
+     merged position's DTL is the sum of each fund's resized DTL: Σ s_f·DTL_f. If the funds used
+     different impact assumptions for the security, each term is first restated to the assumption
+     of the largest position (DTL × smi_f / smi_ref) so they share an ADV basis. Weight = combined
+     dollars (s_f·AUM_f·pct/100) over combined AUM, which reduces to the file's pct for a single
+     fund at scale 1. Returns rows in the shape pctLiquid()/floorDtlAtPct() expect. */
+  function combinePortfolio(codes,scales){
+    var groups={}, order=[], totalAum=0, anon=0;
+    codes.forEach(function(code){
+      var s=scales[code], aum=state.fundTotals[code];
+      if(!(s>0)) return;
+      totalAum+=s*aum;
+      state.byFund[code].forEach(function(r){
+        var k=secKey(r); if(k===null) k="#"+(anon++);
+        var g=groups[k];
+        if(!g){ g=groups[k]={terms:[],dollars:0,funds:{}}; order.push(k); }
+        var usd=s*aum*num(r[COLS.pct])/100;
+        g.terms.push({dtl:s*Math.max(0,num(r[COLS.dtl])), smi:num(r[COLS.smi]), usd:usd});
+        g.dollars+=usd; g.funds[code]=true;
+      });
+    });
+    var overlap=0, smiMixed=0, rows=[];
+    order.forEach(function(k){
+      var g=groups[k], t=g.terms, dtl=0;
+      if(Object.keys(g.funds).length>1) overlap++;
+      var ref=t[0];
+      t.forEach(function(x){ if(Math.abs(x.usd)>Math.abs(ref.usd)) ref=x; });
+      var mixed=t.some(function(x){return x.smi!==ref.smi;});
+      var restate=mixed && t.every(function(x){return x.smi>0;});
+      if(mixed) smiMixed++;
+      t.forEach(function(x){ dtl+= restate ? x.dtl*x.smi/ref.smi : x.dtl; });
+      var row={}; row[COLS.dtl]=dtl; row[COLS.pct]=totalAum>0?g.dollars/totalAum*100:0;
+      rows.push(row);
+    });
+    return {rows:rows, totalAum:totalAum, overlap:overlap, smiMixed:smiMixed};
+  }
+
+  /* Results: a "Combined" row (merged portfolio, pro-rata floor from the combined distribution),
+     then each selected fund on its own at its chosen size (own floor), plus the combined CDF. */
+  function renderAgResults(){
+    var tbl=$("agTbl"); if(!tbl||!state.funds.length) return;
+    var days=[].slice.call(document.querySelectorAll('#agDayRow input')).map(function(i){return num(i.value);});
+    var adv=parseFloat(String($("agAdv").value).replace(/[,\s%]/g,""));
+    var pro=parseFloat(String($("agPro").value).replace(/[,\s%]/g,""));
+    var f=(isFinite(adv)&&adv>0)?100/adv:1, factorOf=function(){return f;};
+    if(!(isFinite(pro)&&pro>0)) pro=0;
+
+    var codes=agCodes(), comb=combinePortfolio(codes,state.agScale);
+    var combFloor=floorDtlAtPct(comb.rows,pro);
+    var actual=0; codes.forEach(function(c){ actual+=state.fundTotals[c]; });
+    if($("agAumActual")){ $("agAumActual").textContent=fmtMoney(actual); $("agAumSized").textContent=fmtMoney(comb.totalAum); }
+
+    var html="<thead><tr><th class='txt'>Portfolio</th><th class='txt'>Fund</th><th>Sized AUM</th>";
+    days.forEach(function(X){ html+="<th>"+X+(X==1?" day":" days")+"</th>"; });
+    html+="</tr></thead><tbody>";
+    if(!codes.length){
+      html+="<tr><td class='txt' colspan='"+(3+days.length)+"'>No funds selected.</td></tr>";
+    }else{
+      html+="<tr class='combined'><td class='txt'>Combined</td><td class='txt'>"+codes.length
+           +" fund"+(codes.length===1?"":"s")+"</td><td>"+fmtMoney(comb.totalAum)+"</td>";
+      days.forEach(function(X){ html+="<td>"+pctLiquid(comb.rows,X,factorOf,1,combFloor).toFixed(1)+"%</td>"; });
+      html+="</tr>";
+      codes.forEach(function(code){
+        var rows=state.byFund[code], s=state.agScale[code], fl=floorDtlAtPct(rows,pro);
+        html+="<tr><td class='txt'>"+esc(code)+"</td><td class='txt'>"+esc(state.codeToDesc[code])
+             +"</td><td>"+fmtMoney(s*state.fundTotals[code])+"</td>";
+        days.forEach(function(X){
+          html+="<td>"+(s>0?pctLiquid(rows,X,factorOf,s,fl).toFixed(1)+"%":"—")+"</td>";
+        });
+        html+="</tr>";
+      });
+    }
+    tbl.innerHTML=html+"</tbody>";
+
+    var msg=comb.overlap
+      ? comb.overlap+" securit"+(comb.overlap===1?"y is":"ies are")+" held in more than one selected fund and "
+        +(comb.overlap===1?"was":"were")+" merged (matched on CUSIP, then ISIN, then ticker): their days to liquidate add, since the funds compete for the same volume."
+      : "No securities are shared between the selected funds, so no positions were merged.";
+    if(comb.smiMixed) msg+=" ⚠ "+comb.smiMixed+" merged securit"+(comb.smiMixed===1?"y has":"ies have")
+      +" different impact assumptions across funds; positions were restated to the assumption of the largest position before adding.";
+    msg+=" Fund rows show each fund on its own at its chosen size, with its own pro-rata floor.";
+    $("agOverlap").textContent=msg;
+
+    /* combined CDF: stressed DTL = max(merged DTL, floor) × ADV factor */
+    var cap=capFromBoxes('#agDayRow input');
+    if(!codes.length){ $("agCdfWrap").innerHTML=""; $("agCdfNote").textContent=""; return; }
+    var series=[{label:"Combined", color:SERIES_COLORS[0], dash:"",
+                 secs:stressedSecs(comb.rows,combFloor,f)}];
+    var st=renderCdf($("agCdfWrap"),series,cap)[0];
+    $("agCdfNote").innerHTML=cdfNoteText(st,cap,"combined portfolio");
   }
 
   /* ---------- calculation ---------- */
@@ -1015,13 +1295,14 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     var days=[].slice.call(document.querySelectorAll('#scDayRow input')).map(function(i){return num(i.value);});
 
     var thd=$("scThDays");
-    thd.innerHTML="<th>ADV assumption %</th><th>Fund size &times;</th><th>Pro-rata percentile %</th>";
+    thd.innerHTML="<th aria-label='Chart line'></th><th>ADV assumption %</th><th>Fund size &times;</th><th>Pro-rata percentile %</th>";
     days.forEach(function(X){
       var th=document.createElement("th"); th.className="days"; th.textContent=X+(X==1?" day":" days");
       thd.appendChild(th);
     });
 
-    [].slice.call($("scenBody").querySelectorAll("tr")).forEach(function(tr){
+    var series=[];
+    [].slice.call($("scenBody").querySelectorAll("tr")).forEach(function(tr,k){
       var ins=tr.querySelectorAll("input");
       var p=parseFloat(String(ins[0].value).replace(/[,\s%]/g,""));
       var mult=parseFloat(String(ins[1].value).replace(/[,\s]/g,""));
@@ -1034,7 +1315,18 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
       days.forEach(function(X,i){
         cells[i].textContent = ok ? pctLiquid(rows,X,factorOf,mult,floorDtl).toFixed(1)+"%" : "—";
       });
+      /* chart line: stressed DTL = max(raw, floor) × (100/p) × mult — same terms as the table */
+      if(ok) series.push({label:"ADV "+trim(p)+"% · size ×"+trim(mult)+" · pro-rata "+(pr>0?trim(pr):"off"),
+                          color:SERIES_COLORS[k%4], dash:SERIES_DASH[k%4],
+                          secs:stressedSecs(rows,floorDtl,(100/p)*mult)});
     });
+
+    var cap=capFromBoxes('#scDayRow input');
+    if(!series.length){ $("scCdfWrap").innerHTML=""; $("scCdfNote").textContent=""; return; }
+    var stats=renderCdf($("scCdfWrap"),series,cap);
+    $("scCdfNote").innerHTML="Within "+trim(cap)+" days: "+series.map(function(sr,i){
+        return esc(sr.label)+" <b>"+stats[i].within.toFixed(1)+"%</b>";
+      }).join(" &middot; ")+". The x-axis cap follows the largest &ldquo;Days to liquidate&rdquo; box above.";
   }
 
   /* Report tab: cumulative distribution of portfolio weight vs. days-to-liquidate (DTL).
@@ -1047,21 +1339,56 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     if(!wrap) return;
     if(!state.current){ wrap.innerHTML=""; note.textContent=""; return; }
     var rows=state.byFund[state.current]||[];
-    var secs=rows.map(function(r){return {dtl:Math.max(0,num(r[COLS.dtl])), pct:num(r[COLS.pct])};})
-                 .sort(function(a,b){return a.dtl-b.dtl;});
-    if(!secs.length){ wrap.innerHTML="<div class='foot'>No securities to plot.</div>"; note.textContent=""; return; }
+    if(!rows.length){ wrap.innerHTML="<div class='foot'>No securities to plot.</div>"; note.textContent=""; return; }
+    var cap=capFromBoxes('#dayRow input');
+    var st=renderCdf(wrap,[{label:"Portfolio",color:SERIES_COLORS[0],dash:"",secs:stressedSecs(rows,0,1)}],cap)[0];
+    note.innerHTML=cdfNoteText(st,cap,"portfolio");
+  }
 
-    /* x-axis cap follows the largest "Days to liquidate" box on the Report tab (fallback 20) */
-    var boxes=[].slice.call(document.querySelectorAll('#dayRow input')).map(function(i){return num(i.value);});
+  /* x-axis cap for a CDF chart: the largest of a tab's "Days to liquidate" boxes (fallback 20) */
+  function capFromBoxes(sel){
+    var boxes=[].slice.call(document.querySelectorAll(sel)).map(function(i){return num(i.value);});
     var cap=Math.max.apply(null, boxes.filter(function(v){return v>0;}).concat([0]));
-    if(!(cap>0)) cap=20;
+    return cap>0?cap:20;
+  }
 
-    /* cumulative step points (DTL, cumulative pct) */
-    var cum=0, pts=[], withinCap=0;
-    secs.forEach(function(s){ cum+=s.pct; pts.push({x:s.dtl, y:cum}); if(s.dtl<=cap) withinCap+=s.pct; });
-    var totalPct=cum;
+  /* {dtl,pct} points sorted by DTL, where dtl = max(raw DTL, floorDtl) × scale — the same
+     effective DTL pctLiquid() uses (floor first, then the uniform scaling). */
+  function stressedSecs(rows,floorDtl,scale){
+    var fl=floorDtl||0;
+    return rows.map(function(r){
+      var base=Math.max(0,num(r[COLS.dtl])); if(fl>base) base=fl;
+      return {dtl:base*scale, pct:num(r[COLS.pct])};
+    }).sort(function(a,b){return a.dtl-b.dtl;});
+  }
 
-    /* ----- SVG geometry ----- */
+  /* cumulative weight (pct points) of securities with DTL <= d; secs sorted ascending */
+  function cumAt(secs,d){
+    var c=0;
+    for(var i=0;i<secs.length && secs[i].dtl<=d+1e-12;i++) c+=secs[i].pct;
+    return c;
+  }
+
+  function cdfNoteText(st,cap,what){
+    var beyond=st.total-st.within, capTxt=" The cap follows the largest &ldquo;Days to liquidate&rdquo; box above.";
+    return beyond>0.05
+      ? "<b>"+st.within.toFixed(1)+"%</b> of the "+what+" liquidates within "+trim(cap)
+        +" days; <b>"+beyond.toFixed(1)+"%</b> is held in securities that take longer (off-chart)."+capTxt
+      : "The entire "+what+" ("+st.total.toFixed(1)+"%) liquidates within "+trim(cap)+" days."+capTxt;
+  }
+
+  function lineSwatch(color,dash){
+    return "<svg width='26' height='10' aria-hidden='true'><line x1='1' y1='5' x2='25' y2='5' stroke='"+color
+      +"' stroke-width='2.5'"+(dash?" stroke-dasharray='"+dash+"'":"")+"/></svg>";
+  }
+
+  /* Cumulative distribution of portfolio weight vs. days-to-liquidate (DTL), one step line per
+     series [{label,color,dash,secs:[{dtl,pct}] sorted}]. y = cumulative % of the portfolio in
+     securities with DTL <= x; x is capped at `cap` and weight beyond it is off-chart. A single
+     series gets a soft area fill and no legend (the card title names it); several get a legend and
+     no fill. A crosshair + tooltip reads every series at the hovered DTL. Pure inline SVG so it
+     survives offline viewing and emailing (no chart library / CDN). Returns [{within,total}] per series. */
+  function renderCdf(wrap,series,cap){
     var W=720,H=360, mL=52,mR=18,mT=14,mB=42, pw=W-mL-mR, ph=H-mT-mB;
     var x=function(d){return mL + Math.min(d,cap)/cap*pw;};
     var y=function(v){return mT + (1 - v/100)*ph;};
@@ -1081,34 +1408,55 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
     s.push("<line x1='"+mL+"' y1='"+(mT+ph)+"' x2='"+(W-mR)+"' y2='"+(mT+ph)+"' stroke='#94a3b8'/>");
     s.push("<line x1='"+mL+"' y1='"+mT+"' x2='"+mL+"' y2='"+(mT+ph)+"' stroke='#94a3b8'/>");
 
-    /* empirical-CDF step path: horizontal at the current level to each DTL, then a vertical jump */
-    var d="M "+x(0)+" "+y(0), prevY=0, capped=false;
-    for(var i=0;i<pts.length;i++){
-      var px=pts[i].x;
-      if(px>cap){ d+=" L "+x(cap)+" "+y(prevY); capped=true; break; }
-      d+=" L "+x(px)+" "+y(prevY)+" L "+x(px)+" "+y(pts[i].y);
-      prevY=pts[i].y;
-    }
-    if(!capped) d+=" L "+x(cap)+" "+y(prevY);
-
-    s.push("<path d='"+d+" L "+x(cap)+" "+y(0)+" Z' fill='#eff6ff' stroke='none'/>");
-    s.push("<path d='"+d+"' fill='none' stroke='#1d4ed8' stroke-width='2' stroke-linejoin='round'/>");
+    var stats=series.map(function(sr){
+      /* empirical-CDF step path: horizontal at the current level to each DTL, then a vertical jump */
+      var d="M "+x(0)+" "+y(0), prevY=0, cum=0, capped=false;
+      for(var i=0;i<sr.secs.length;i++){
+        var px=sr.secs[i].dtl;
+        if(px>cap){ d+=" L "+x(cap)+" "+y(prevY); capped=true; break; }
+        cum+=sr.secs[i].pct;
+        d+=" L "+x(px)+" "+y(prevY)+" L "+x(px)+" "+y(cum);
+        prevY=cum;
+      }
+      if(!capped) d+=" L "+x(cap)+" "+y(prevY);
+      if(series.length===1) s.push("<path d='"+d+" L "+x(cap)+" "+y(0)+" Z' fill='#eff6ff' stroke='none'/>");
+      s.push("<path d='"+d+"' fill='none' stroke='"+sr.color+"' stroke-width='2' stroke-linejoin='round'"
+             +(sr.dash?" stroke-dasharray='"+sr.dash+"'":"")+"/>");
+      var total=0; sr.secs.forEach(function(q){total+=q.pct;});
+      return {within:cumAt(sr.secs,cap), total:total};
+    });
 
     s.push("<text x='"+(mL+pw/2)+"' y='"+(H-6)+"' text-anchor='middle' font-size='12' fill='#64748b'>Days to liquidate (DTL)</text>");
     s.push("<text transform='translate(14,"+(mT+ph/2)+") rotate(-90)' text-anchor='middle' font-size='12' fill='#64748b'>Cumulative portfolio weight (%)</text>");
+    /* hover layer: crosshair (hidden until hover) + a transparent hit area over the plot */
+    s.push("<line class='cdf-x' x1='0' y1='"+mT+"' x2='0' y2='"+(mT+ph)+"' stroke='#64748b' stroke-dasharray='3 3' visibility='hidden'/>");
+    s.push("<rect class='cdf-hit' x='"+mL+"' y='"+mT+"' width='"+pw+"' height='"+ph+"' fill='transparent'/>");
 
-    wrap.innerHTML="<svg viewBox='0 0 "+W+" "+H+"' width='100%' preserveAspectRatio='xMidYMid meet' role='img' "
-      +"aria-label='Cumulative distribution of portfolio weight by days to liquidate'>"+s.join("")+"</svg>";
+    var legend=series.length>1 ? "<div class='cdf-legend'>"+series.map(function(sr){
+        return "<span>"+lineSwatch(sr.color,sr.dash)+esc(sr.label)+"</span>";
+      }).join("")+"</div>" : "";
+    wrap.innerHTML=legend+"<div class='cdf-plot'><svg viewBox='0 0 "+W+" "+H+"' width='100%' "
+      +"preserveAspectRatio='xMidYMid meet' role='img' aria-label='Cumulative distribution of portfolio weight by days to liquidate'>"
+      +s.join("")+"</svg><div class='cdf-tip hidden'></div></div>";
 
-    var beyond=totalPct-withinCap;
-    if(beyond>0.05){
-      note.innerHTML="<b>"+withinCap.toFixed(1)+"%</b> of the portfolio liquidates within "+trim(cap)
-        +" days; <b>"+beyond.toFixed(1)+"%</b> is held in securities that take longer (off-chart). "
-        +"The cap follows the largest &ldquo;Days to liquidate&rdquo; box above.";
-    }else{
-      note.innerHTML="The entire portfolio ("+totalPct.toFixed(1)+"%) liquidates within "+trim(cap)
-        +" days. The cap follows the largest &ldquo;Days to liquidate&rdquo; box above.";
-    }
+    var svg=wrap.querySelector(".cdf-plot > svg"), hit=wrap.querySelector(".cdf-hit"),
+        xl=wrap.querySelector(".cdf-x"), tip=wrap.querySelector(".cdf-tip");
+    hit.addEventListener("mousemove",function(e){
+      var rect=svg.getBoundingClientRect(), k=rect.width/W;
+      if(!(k>0)) return;                              /* not laid out (hidden tab) */
+      var vx=Math.max(mL,Math.min(mL+pw,(e.clientX-rect.left)/k));
+      var d=(vx-mL)/pw*cap;
+      xl.setAttribute("x1",vx); xl.setAttribute("x2",vx); xl.setAttribute("visibility","visible");
+      tip.innerHTML="<b>Within "+d.toFixed(d<10?1:0)+" days</b>"+series.map(function(sr){
+          return "<div class='r'>"+lineSwatch(sr.color,sr.dash)+(series.length>1?esc(sr.label)+": ":"")
+                 +"<b>"+cumAt(sr.secs,d).toFixed(1)+"%</b></div>";
+        }).join("");
+      tip.classList.remove("hidden");
+      var px=vx*k, tw=tip.offsetWidth;                /* flip to the left of the cursor near the right edge */
+      tip.style.left=Math.max(0, px+tw+16>rect.width ? px-tw-12 : px+12)+"px";
+    });
+    hit.addEventListener("mouseleave",function(){ xl.setAttribute("visibility","hidden"); tip.classList.add("hidden"); });
+    return stats;
   }
 
   /* round a raw tick interval up to a 1/2/5 ×10ⁿ "nice" number */

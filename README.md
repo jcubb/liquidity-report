@@ -12,14 +12,16 @@ HTML file and drag in a holdings export.
 3. Pick a fund (by description or fund ticker), then adjust parameters — the report
    recalculates live.
 
-The report has five tabs:
+The report has six tabs:
 
-- **Report** — the fund selector, parameters, and the *Portfolio Percent Liquid by
-  Horizon* table.
+- **Report** — the fund selector, parameters, the *Portfolio Percent Liquid by
+  Horizon* table, and a chart of cumulative portfolio weight by days to liquidate
+  (file originals; hover for values).
 - **Scenarios** — the selected fund run under four side-by-side scenarios, each set
   by an ADV-assumption %, a fund-size multiplier, and an optional *pro-rata percentile*
   floor; independent horizon boxes. Always starts from the file's original values
-  (Report-tab overrides don't carry over).
+  (Report-tab overrides don't carry over). Below the table, one cumulative-weight chart
+  with a line per scenario, using each scenario's stressed days-to-liquidate.
 - **Data** — the selected fund's securities at row level (sortable), including
   `asset_class`, `liquidity_methodology`, and `liquidation_size`, with a totals
   footer that flags when the security weights don't sum to 100%. Includes a
@@ -33,6 +35,13 @@ The report has five tabs:
   and a **pro-rata percentile %** floor (0 = off, applied per fund) — apply uniformly
   across all selected funds. At the defaults (ADV 100, pro-rata 0) the figures
   reproduce the file. The Report tab's overrides do not apply here.
+- **Aggregate** — the selected funds combined into **one portfolio**. Each fund can be
+  resized with a linked multiplier / dollar-AUM box. Securities held in more than one
+  fund are **merged** (matched on CUSIP, then ISIN, then ticker): their days to
+  liquidate add, since the funds compete for the same volume. Shared **ADV assumption %**
+  and **pro-rata percentile %** stressors; the table shows a *Combined* row (pro-rata
+  floor from the combined distribution) above each fund's standalone row at its chosen
+  size, plus a cumulative-weight chart for the combined book.
 - **Notes** — a plain-language explanation of the methodology.
 
 The report reads the OversightSummary worksheet and expects these columns:
@@ -85,6 +94,17 @@ The percent of the portfolio liquidatable in `X` days is the sum of
 Because both overrides scale `days_to_liquidate` reciprocally, their effects
 compose predictably — e.g. doubling **Z** (twice as fast) is exactly offset by
 doubling **M** (twice as large), leaving the result unchanged.
+
+**Aggregate tab.** With fund `f` resized by `s_f`, a security's combined position is
+
+```
+combined_dtl    = Σ_f  s_f × days_to_liquidate_f            (restated to a common impact
+                                                              assumption if the funds differ)
+combined_weight = Σ_f  s_f × AUM_f × pct_f/100  /  Σ_f s_f × AUM_f
+```
+
+and the usual horizon formula is applied to the merged rows. With one fund at ×1 this
+reproduces that fund's own figures.
 
 ## Notes
 
