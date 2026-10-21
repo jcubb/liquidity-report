@@ -53,6 +53,8 @@
   .row{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
   .daybox{flex:1;min-width:78px}
   .daybox input{text-align:center}
+  .presetBtns{display:flex;gap:8px;margin-top:6px}
+  .preset.active{background:var(--accent-soft);border-color:var(--accent);font-weight:600}
   .mv-line{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:14px}
   .mv-line .big{font-size:22px;font-weight:700}
   .btn{font-size:13px;padding:6px 12px;border:1px solid #cbd5e1;background:#fff;border-radius:8px;
@@ -198,6 +200,7 @@
 
     <div class="card">
       <label>Days to liquidate</label>
+      <div class="presetBtns"><button class="btn preset" type="button" data-row="dayRow" data-preset="short">Short term</button><button class="btn preset" type="button" data-row="dayRow" data-preset="long">Long term</button></div>
       <div class="row" id="dayRow"></div>
     </div>
 
@@ -222,6 +225,7 @@
     <div id="panel-scenarios" class="panel hidden">
       <div class="card">
         <label>Days to liquidate</label>
+        <div class="presetBtns"><button class="btn preset" type="button" data-row="scDayRow" data-preset="short">Short term</button><button class="btn preset" type="button" data-row="scDayRow" data-preset="long">Long term</button></div>
         <div class="row" id="scDayRow"></div>
       </div>
       <div class="card">
@@ -303,6 +307,7 @@
 
       <div class="card">
         <label>Days to liquidate</label>
+        <div class="presetBtns"><button class="btn preset" type="button" data-row="mfDayRow" data-preset="short">Short term</button><button class="btn preset" type="button" data-row="mfDayRow" data-preset="long">Long term</button></div>
         <div class="row" id="mfDayRow"></div>
       </div>
 
@@ -368,6 +373,7 @@
 
       <div class="card">
         <label>Days to liquidate</label>
+        <div class="presetBtns"><button class="btn preset" type="button" data-row="agDayRow" data-preset="short">Short term</button><button class="btn preset" type="button" data-row="agDayRow" data-preset="long">Long term</button></div>
         <div class="row" id="agDayRow"></div>
       </div>
 
@@ -501,7 +507,9 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   "use strict";
   var COLS={fund:"fund",desc:"fund_description",mv:"market_value",
             pct:"market_value__pct",dtl:"days_to_liquidate",smi:"significant_market_impact"};
-  var DEFAULT_DAYS=[1,2,3,4,5,10,20];
+  var PRESET_SHORT=[1,2,3,4,5,10,21];
+  var PRESET_LONG=[1,5,10,21,63,126,252];
+  var DEFAULT_DAYS=PRESET_SHORT.slice();   /* Short term is the default; preset buttons switch the 7 boxes */
   var SCEN_DEFAULTS=[[100,1,0],[100,1,90],[25,1,0],[25,1,90]];   /* [ADV assumption %, fund size ×, pro-rata percentile %] */
 
   /* chart series styling: fixed categorical order (validated palette) + a dash per slot as a
@@ -678,6 +686,9 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
       wrap.appendChild(lab); wrap.appendChild(inp); adr.appendChild(wrap);
     });
 
+    /* boxes were rebuilt from DEFAULT_DAYS (Short term) -> reflect that on the preset buttons */
+    ["dayRow","scDayRow","mfDayRow","agDayRow"].forEach(function(r){ markPresetActive(r,"short"); });
+
     /* Multi-Fund tab: start with every fund selected; rebuild the checkbox list */
     state.mfSelected={};
     state.funds.forEach(function(code){ state.mfSelected[code]=true; });
@@ -758,6 +769,27 @@ t.sheetStubs=true}if(t.type=="array"){t.type="binary";var a=xk(e,t);t.type="arra
   $("resetM").addEventListener("click",function(){
     if(state.current) $("mval").value=fmtNum(state.fundTotals[state.current]);
     recalc();
+  });
+
+  /* Days-to-liquidate presets: each button loads its row's 7 boxes with a preset.
+     Values are set, then a single input event is dispatched on one box so that row's
+     own listener (recalc / recalcScenarios / renderMfResults / renderAgResults) runs once. */
+  function markPresetActive(rowId,which){
+    [].slice.call(document.querySelectorAll('.preset[data-row="'+rowId+'"]')).forEach(function(b){
+      b.classList.toggle("active", b.dataset.preset===which);
+    });
+  }
+  function applyPreset(rowId,which){
+    var vals=(which==="long"?PRESET_LONG:PRESET_SHORT);
+    var inputs=document.querySelectorAll("#"+rowId+" input");
+    if(!inputs.length) return;
+    for(var i=0;i<inputs.length && i<vals.length;i++){ inputs[i].value=vals[i]; }
+    inputs[inputs.length-1].dispatchEvent(new Event("input"));
+    markPresetActive(rowId,which);
+  }
+  [].slice.call(document.querySelectorAll(".preset")).forEach(function(b){
+    if(b.dataset.preset==="short") b.classList.add("active");   /* Short term is the default */
+    b.addEventListener("click",function(){ applyPreset(b.dataset.row,b.dataset.preset); });
   });
 
   /* tabs */
